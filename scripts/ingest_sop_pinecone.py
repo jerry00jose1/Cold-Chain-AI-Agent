@@ -31,6 +31,7 @@ if not pinecone_api_key:
 
 embeddings_setting = os.getenv("Embeddings_model", "LOCAL").strip().upper()
 
+# Potentially move embeddings model to openai
 if embeddings_setting == "OPENAI":
     if not os.getenv("OPENAI_API_KEY"):
         raise ValueError("Embeddings_model=OPENAI but OPENAI_API_KEY is empty in .env")
