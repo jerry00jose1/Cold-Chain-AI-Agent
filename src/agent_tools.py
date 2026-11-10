@@ -1,60 +1,45 @@
 import json
 import os
+import sys
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import urlopen
 
 import pandas as pd
-from dotenv import load_dotenv
 from langchain_core.tools import tool
 from langchain_pinecone import PineconeVectorStore
-from sqlalchemy import URL, create_engine, text
+from sqlalchemy import text
 
 project_root = Path(__file__).resolve().parents[1]
-load_dotenv(project_root / ".env")
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from src.settings import database_engine, embedding_index, get_embeddings
 
 VIEW_NAME = "fde_views.vw_active_fleet"
 MAX_ROWS = 25
 
-pinecone_api_key = os.getenv("PINECONE_API_KEY")
-if not pinecone_api_key:
-    raise ValueError("Missing PINECONE_API_KEY in .env")
+_engine = None
+_retriever = None
 
-for required_name in ("PG_AGENT_USER", "PG_AGENT_PASSWORD", "PG_DB"):
-    if not os.getenv(required_name):
-        raise ValueError(f"Missing {required_name} in .env")
 
-embeddings_setting = os.getenv("Embeddings_model", "LOCAL").strip().upper()
+def get_agent_engine():
+    global _engine
+    if _engine is None:
+        _engine = database_engine(
+            os.getenv("PG_AGENT_USER", ""),
+            os.getenv("PG_AGENT_PASSWORD", ""),
+        )
+    return _engine
 
-if embeddings_setting == "OPENAI":
-    if not os.getenv("OPENAI_API_KEY"):
-        raise ValueError("Embeddings_model=OPENAI but OPENAI_API_KEY is empty in .env")
-    from langchain_openai import OpenAIEmbeddings
 
-    print("Embeddings: OpenAI (1536 dimensions)")
-    embeddings = OpenAIEmbeddings()
-    index_name = "fde-sop-index-openai"
-else:
-    from langchain_huggingface import HuggingFaceEmbeddings
-
-    local_model = os.getenv("Local_Embedding_Model", "BAAI/bge-m3").strip()
-    print(f"Embeddings: local Hugging Face model {local_model} (1024 dimensions)")
-    embeddings = HuggingFaceEmbeddings(model_name=local_model, model_kwargs={"device": "cpu"})
-    index_name = "fde-sop-index-local"
-
-engine = create_engine(
-    URL.create(
-        "postgresql+psycopg",
-        username=os.getenv("PG_AGENT_USER"),
-        password=os.getenv("PG_AGENT_PASSWORD"),
-        host=os.getenv("PG_HOST", "localhost"),
-        port=int(os.getenv("PG_PORT", "5432")),
-        database=os.getenv("PG_DB"),
-    )
-)
-
-vector_store = PineconeVectorStore(index_name=index_name, embedding=embeddings)
-retriever = vector_store.as_retriever(search_kwargs={"k": 2})
+def get_retriever():
+    global _retriever
+    if _retriever is None:
+        index_name, _dimension = embedding_index()
+        vector_store = PineconeVectorStore(index_name=index_name, embedding=get_embeddings())
+        _retriever = vector_store.as_retriever(search_kwargs={"k": 2})
+    return _retriever
 
 
 def _single_select(sql_query: str) -> str:
@@ -90,7 +75,7 @@ def query_telemetry_db(sql_query: str) -> str:
     try:
         statement = _single_select(sql_query)
         wrapped = text(f"SELECT * FROM ({statement}) AS agent_query LIMIT {MAX_ROWS}")
-        with engine.connect() as conn:
+        with get_agent_engine().connect() as conn:
             conn.execute(text("SET LOCAL statement_timeout = '15s'"))
             frame = pd.read_sql(wrapped, conn)
     except Exception as exc:
@@ -140,7 +125,7 @@ def search_compliance_sop(query: str) -> str:
     and escalation thresholds. Cite the returned source file.
     """
     try:
-        matched_docs = retriever.invoke(query)
+        matched_docs = get_retriever().invoke(query)
     except Exception as exc:
         return f"Vector Store Retrieval Error: {exc}"
 
