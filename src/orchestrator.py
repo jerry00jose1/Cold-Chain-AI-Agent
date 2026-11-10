@@ -14,6 +14,7 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from src.settings import EXAMPLE_QUESTIONS, agent_llm_name
+from src.transcript import message_text
 
 system_prompt = (project_root / "src" / "prompts" / "system_prompt.txt").read_text()
 
@@ -87,7 +88,7 @@ def ask(question: str, thread_id: str = "dispatcher") -> str:
         {"messages": [HumanMessage(content=question)]},
         {"configurable": {"thread_id": thread_id}, "recursion_limit": 12},
     )
-    return result["messages"][-1].content
+    return message_text(result["messages"][-1]) or "No answer was produced."
 
 
 if __name__ == "__main__":
