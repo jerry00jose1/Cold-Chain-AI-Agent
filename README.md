@@ -1,4 +1,4 @@
-```markdown
+
 # Cold-chain dispatch assistant
 
 A small dispatcher console for refrigerated shipments. You ask a question in the browser, and it checks fleet readings in Postgres, looks up the operating procedure in Pinecone, and can pull live weather for a coordinate. The model answers from those results.
@@ -92,4 +92,4 @@ python src/orchestrator.py
 - `src/orchestrator.py` is the LangGraph loop
 - `scripts/ingest_legacy_data.py` loads the CSV into `legacy.t_rfr_tlm_hist`
 - `data/policy/` is the SOP that gets embedded
-```
+
