@@ -1,50 +1,22 @@
 import os
 import uuid
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
-from dotenv import load_dotenv
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-from sqlalchemy import URL, create_engine, text
+from langchain_core.messages import HumanMessage
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
-
-from src.agent_tools import engine as agent_engine
-from src.orchestrator import agent_llm, graph
+from src.agent_tools import get_agent_engine
+from src.orchestrator import get_graph
+from src.settings import EXAMPLE_QUESTIONS, agent_llm_name, database_engine
+from src.transcript import pair_tool_results
 
 st.set_page_config(page_title="Cold-chain dispatch", page_icon="❄", layout="wide")
 
-EXAMPLES = {
-    "Los Angeles breach": (
-        "Find shipments near Los Angeles (latitude 33.8, longitude -118.1) with "
-        "cargo_temperature_c above 4. Check the weather there and say whether that "
-        "violates the SOP for fresh perishables."
-    ),
-    "High-risk rule": (
-        "I'm a new dispatcher on the night shift. Can you explain what this SOP "
-        "requires for a high-risk shipment?"
-    ),
-}
-
-
-def database_engine(username: str, password: str):
-    return create_engine(
-        URL.create(
-            "postgresql+psycopg",
-            username=username,
-            password=password,
-            host=os.getenv("PG_HOST", "localhost"),
-            port=int(os.getenv("PG_PORT", "5432")),
-            database=os.getenv("PG_DB"),
-        ),
-        pool_pre_ping=True,
-    )
-
 
 def log_audit(session_id: str, node_name: str, tool_name: str, content: str) -> None:
-    with agent_engine.begin() as conn:
+    with get_agent_engine().begin() as conn:
         conn.execute(
             text(
                 """
@@ -63,44 +35,13 @@ def log_audit(session_id: str, node_name: str, tool_name: str, content: str) -> 
         )
 
 
-def message_text(message) -> str:
-    content = message.content
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts = []
-        for block in content:
-            if isinstance(block, str):
-                parts.append(block)
-            elif isinstance(block, dict) and block.get("text"):
-                parts.append(block["text"])
-        return "\n".join(parts)
-    return str(content or "")
-
-
 def run_turn(question: str, session_id: str) -> dict:
+    graph = get_graph()
     config = {"configurable": {"thread_id": session_id}, "recursion_limit": 12}
     snapshot = graph.get_state(config)
     previous = snapshot.values.get("messages", []) if snapshot.values else []
     result = graph.invoke({"messages": [HumanMessage(content=question)]}, config)
-    new_messages = result["messages"][len(previous):]
-
-    tools = []
-    for message in new_messages:
-        if isinstance(message, AIMessage):
-            for call in message.tool_calls or []:
-                tools.append({"name": call["name"], "args": call.get("args", {}), "result": ""})
-        elif isinstance(message, ToolMessage):
-            for tool in reversed(tools):
-                if tool["name"] == message.name and tool["result"] == "":
-                    tool["result"] = message.content
-                    break
-
-    answer = ""
-    for message in reversed(new_messages):
-        if isinstance(message, AIMessage) and message_text(message) and not message.tool_calls:
-            answer = message_text(message)
-            break
+    tools, answer = pair_tool_results(result["messages"][len(previous):])
 
     audit_error = None
     try:
@@ -142,11 +83,11 @@ def queue_example(question: str) -> None:
 def draw_sidebar() -> None:
     with st.sidebar:
         st.radio("Page", ["Dispatch", "Audit log"], key="page")
-        st.caption(f"Agent model: {agent_llm}")
+        st.caption(f"Agent model: {agent_llm_name()}")
         st.caption(f"Session: {st.session_state.session_id[:8]}")
         st.divider()
         st.markdown("**Try a question**")
-        for label, question in EXAMPLES.items():
+        for label, question in EXAMPLE_QUESTIONS:
             st.button(label, use_container_width=True, on_click=queue_example, args=(question,))
         st.divider()
         st.caption("Fleet readings in the database run from 1 Jan 2021 through 29 Aug 2024.")
