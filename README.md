@@ -1,7 +1,7 @@
 
 # Cold-chain dispatch assistant
 
-A small dispatcher console for refrigerated shipments. You ask a question in the browser, and it checks fleet readings in Postgres, looks up the operating procedure in Pinecone, and can pull live weather for a coordinate. The model answers from those results.
+A small dispatcher assistant for refrigerated shipments. You ask a question in the browser or in Slack, and it checks fleet readings in Postgres, looks up the operating procedure in Pinecone, and can pull live weather for a coordinate. The model answers from those results.
 
 The fleet data is a historical CSV (Jan 2021 through Aug 2024), loaded into a messy "legacy" table. The assistant is only allowed to read a cleaned-up view. It can write an audit log of what it did, and it cannot read that log back.
 
@@ -12,7 +12,8 @@ The fleet data is a historical CSV (Jan 2021 through Aug 2024), loaded into a me
 - LangGraph, with DeepSeek, OpenAI, or a local Ollama model
 - Embeddings from a local Hugging Face model (`BAAI/bge-m3`) or OpenAI
 - Pinecone for the SOP
-- Streamlit for the UI
+- Streamlit for the browser UI
+- Slack Bolt, in Socket Mode, for the same assistant in Slack
 
 ## Setup
 
@@ -44,6 +45,9 @@ PG_AGENT_PASSWORD=AgentPassword2026
 
 Embeddings_model=LOCAL
 Agent_llm=DEEPSEEK
+
+SLACK_BOT_TOKEN=
+SLACK_APP_TOKEN=
 
 OPENAI_API_KEY=
 DEEPSEEK_API_KEY=
@@ -85,9 +89,33 @@ There is also a terminal version:
 python src/orchestrator.py
 ```
 
+## Slack
+
+Same assistant, different front door. `slack_app.py` acknowledges the message, runs the question, and posts the answer in the thread. Leave the process running while you use it.
+
+```bash
+python slack_app.py
+```
+
+The Slack tokens are created at [api.slack.com/apps](https://api.slack.com/apps):
+
+- **Basic Information → App-Level Tokens.** Generate a token with the `connections:write` scope. It starts with `xapp-`. That is `SLACK_APP_TOKEN`. Then turn on **Socket Mode**.
+- **OAuth & Permissions.** Add the bot scopes `app_mentions:read`, `chat:write`, `im:history`, `im:read`, and `im:write`. Click **Install to Workspace**. The **Bot User OAuth Token** starts with `xoxb-`. That is `SLACK_BOT_TOKEN`.
+- **Event Subscriptions.** Subscribe to `app_mention` and `message.im`.
+- **App Home.** Turn on the Messages tab, or direct messages never arrive.
+
+Invite the bot into a channel (`/invite @YourBot`), then mention it:
+
+```text
+@YourBot which shipments near Los Angeles are above 4°C?
+```
+
+A direct message does not need the mention. Follow-ups in the same thread keep the conversation. Restarting `slack_app.py` clears it. The first question also downloads or loads the embedding model, so it is slower than the ones after it.
+
 ## Layout
 
 - `app.py` is the Streamlit console
+- `slack_app.py` is the Slack listener
 - `src/agent_tools.py` is the SQL, weather, and SOP tools
 - `src/orchestrator.py` is the LangGraph loop
 - `scripts/ingest_legacy_data.py` loads the CSV into `legacy.t_rfr_tlm_hist`
