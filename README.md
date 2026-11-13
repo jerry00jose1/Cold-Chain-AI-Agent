@@ -9,8 +9,8 @@ The fleet data is a historical CSV (Jan 2021 through Aug 2024), loaded into a me
 
 - Python 3.12
 - Postgres
-- LangGraph, with DeepSeek, OpenAI, or a local Ollama model
-- Embeddings from a local Hugging Face model (`BAAI/bge-m3`) or OpenAI
+- LangGraph, with DeepSeek model
+- Embeddings from a local Hugging Face model (`BAAI/bge-m3`)
 - Pinecone for the SOP
 - Streamlit for the browser UI
 - Slack Bolt, in Socket Mode, for the same assistant in Slack
